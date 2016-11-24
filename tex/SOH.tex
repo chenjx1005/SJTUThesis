@@ -1,0 +1,111 @@
+%# -*- coding: utf-8-unix -*-
+%%==================================================
+%% chapter02.tex for SJTU Master Thesis
+%% based on CASthesis
+%% modified by wei.jianwen@gmail.com
+%% Encoding: UTF-8
+%%==================================================
+
+\chapter{ 在线自组织哈希}
+\label{chap:SOH}
+
+在哈希领域中，大部分哈希方法如局部敏感哈希（Locality-Sensitive Hashing，LSH）等，使用超平面作为哈希函数。在这些方法中，首先，一些按照特点方式生成的超平面将数据空间切分成几个不重叠的区域；之后，处在每个区域内数据点被量化成一个二值编码。
+
+同时，一些不依靠超平面的哈希方法也被提了出来。如球哈希（Spherical Hashing）和K均值哈希（Kmeans Hashing， KMH）。相比于使用超平面的哈希方法，这些方法的优点在于能定义更加紧密的不重叠区域，从而提升哈希的效果。KMH提出了一个几何视角来比较哈希和量化（Quantization）这两种方法，即任何使用正交的超平面来切割空间的哈希方法，都可以看成是使用一个超正方体的顶点作为量化中心的量化方法。KMH使用EM算法来优化量化误差（quantization error）和亲和误差（affinity error）两种误差的和。凭借K均值量化的适应性和亲和保持能力，KMH的效果超过了绝大部分基于超平面的哈希方法。
+
+虽然这些哈希方法取得了优良的效果，但是他们在两个特点环境下仍存在问题。首先，存储在分布式系统上的海量大数据根本无法存入计算机内存中；其次，很多应用的数据以流式产生，而这些方法必须将所有数据积累起来再学习哈希函数。
+
+为了解决这些问题，两个在线哈希技术被提出，分别是在线哈希（OKH）和在线梗概哈希（OSH）。这两种方法凭借在线学习的方式，解决了上述两个问题。但是，他们是基于超平面的哈希方法，存在着分割空间能力弱的问题。所以，本文在本章节提出一种基于在线自组织映射网络的哈希方法——在线自组织哈希。该哈希方法有两点好处：
+ \begin{itemize}
+ 	\item 该方法假设数据以流式的方法到来，并在收取到任意数据后即可立即更新模型。该方法特别适合数据量或数据维度极大的大数据应用。
+ 	\item 在构造超正方体的过程中，超正方体顶点的拓扑结构可以被很好的保持。因此，该方法不仅有比基于超平面哈希的优势，还比KMH具有更低的量化误差和亲和误差。
+ \end{itemize}
+
+本章首先会介绍与在线自组织哈希相关的工作如K均值哈希、自组织映射网络的相关知识，再详细介绍该方法的算法细节。最后是实验结果和结论部分。
+
+\section{相关工作}
+在该部分，本文会简要介绍K均值哈希（Kmeans Hashing，KMH）、自组织映射网络（Self Organizing-Map，SOM）两种技术。
+
+\subsection{K均值哈希}
+K均值哈希是一个基于K均值聚类方法的能保持数据与量化中心亲和的哈希方法。该方法结合了哈希与量化技术，非常新颖。
+给定一个数据集 $\mathbf{X} = [\mathbf{x}_{1}, \mathbf{x}_{2},...,\mathbf{x}_{n}]^{T} \in R^{n\times d}$ ,
+KMH首先构建一系列向量 $\mathbf{W} = [\mathbf{w}_{1},  \mathbf{w}_{2}, ..., \mathbf{w}_{k}]^{T} \in R^{k\times d}$.
+该向量集合$\mathbf{W}$ 被叫做码表，其中 $\mathbf{w}_{i}$是一个编码值。每个编码值同时又一个二值码$\mathbf{y}_{i}\in \{0, 1\}^{b}$，其中 $b$ 代表了二值编码的长度，所以可得出$k=2^{b}$。之后KMH将任意数据点$\mathbf{x}$映射到一个编码值$\mathbf{w}_{i(\mathbf{x})}$同时最小化下面的目标函数:
+\begin{equation}\label{eq:4}
+E = E_{\mathrm{quan}} + \rho E_{\mathrm{aff}}.
+\end{equation}
+其中$E_{\mathrm{quan}}$是经典的K均值算法的平均\emph{量化误差}:
+\begin{equation}\label{eq:1}
+E_{\mathrm{quan}} = \frac{1}{n}\sum_{\mathbf{x}\in \mathbf{X}} ||\mathbf{x}-\mathbf{w}_{i(\mathbf{x})}||^{2},
+\end{equation}
+其中$E_{\mathrm{aff}}$是由于使用二值编码来近似聚类中心所导致的\emph{亲和误差}:
+\begin{equation}
+E_{\mathrm{aff}}= \sum_{i=1}^{k}\sum_{j=1}^{k}w_{ij}(d(\mathbf{w}_{i}, \mathbf{w}_{j}) - d_{h}(i, j))^2.
+\end{equation}
+在这里，$w_{ij} = n_{i}n_{j}/n^{2}$. $n_{i}$和$n_{j}$是索引值为$i$和$j$的样本数量。 $d_{h}$是两个二值编码$\mathbf{y}_{i}$和$\mathbf{y}_{j}$的基于海明值的距离：
+\begin{equation}\label{eq:d_h}
+d_{h}(i,j) \triangleq s \cdot h^{\frac{1}{2}}(\mathbf{y}_{i},\mathbf{y}_{j}),
+\end{equation}
+其中$s$使用过主成分哈希（PCAH）所确定的一个缩放常量。 $h$代表海明距离。
+KMH使用类似于K均值算法中使用的EM算法来优化这个目标函数。
+
+\subsection{自组织映射网络}
+\begin{algorithm}[tb]
+	\caption{自组织映射算法}
+	\label{alg:som}
+	\begin{algorithmic}
+		\Repeat
+		\State 1.在每个时间点$t$, 输入一个$\mathbf{x}(t)$, 并选择距离$\mathbf{x}(t)$最近的神经元。
+		\begin{equation}\label{eq:5}
+		v(t) = \mathrm{arg\ min}_{1 \leq i \leq k} || \mathbf{x}(t) - \mathbf{w}_{i}(t)||
+		\end{equation}
+		\State 2.更新所有神经元的权值。
+		\begin{equation}\label{eq:6}
+		\Delta\mathbf{w}_{i}(t) = \alpha(t)\eta(v, i, t)\big(\mathbf{x}(t) - \mathbf{w}_{i}(t)\big)
+		\end{equation}
+		\Until{网络收敛}
+	\end{algorithmic}
+\end{algorithm}
+自组织映射网络（SOM）是一个能对高位数据进行拓扑结构保持的有效量化的无监督神经网络。SOM使用一系列的组织在二维平面上的神经元，来组成一个多边形，用来近似$d$维的原始输入数据$\mathbf{X}$的拓扑结构。这里本文假设神经元的维度为$b$ ，共有$k$个神经元。由此在该空间中得到一个向量的集合$\mathbf{R} = [\mathbf{r}_{1},  \mathbf{r}_{2}, ..., \mathbf{r}_{k}]^{T} \in R^{k\times b}$。在学习的初始阶段，所有的权值$\mathbf{W} = [\mathbf{w}_{1},  \mathbf{w}_{2}, ..., \mathbf{w}_{k}]^{T} \in R^{k\times d}$被初始化为随机的数值。其中，$\mathbf{w}_{i}$是神经元$i$的权值向量。该向量和输入数据$\mathbf{x}$的维度$d$一致。然后，自组织映射算法重复算法\ref{alg:som}中的步骤。$\eta(v, i, t)$是邻接函数。一般来说，我们可以使用任意形式的邻接函数，但是在实际问题中，高斯函数是最常用的：
+\begin{equation}\label{eq:7}
+\eta(v, i, t) = exp\Big(-\frac{Dist(\mathbf{r}_{v} , \mathbf{r}_{i})}{2\sigma(t)^{2}}\Big),
+\end{equation}
+\begin{equation}\label{eq:8}
+\sigma(t) = \sigma_{0}exp(-\frac{t}{\lambda}),
+\end{equation}
+公式\ref{eq:6}中的学习率$\alpha(t)$同样是一个指数形式的衰减函数，用来确保SOM算法最终收敛：
+\begin{equation}\label{eq:9}
+\alpha(t) = \alpha_{0}exp(-\frac{t}{\lambda}),
+\end{equation}
+当SOM的节点数较少时，该算法与K均值算法类似。但SOM的网络很大时，网络的拓扑结构就会呈现出与数据的拓扑结构近似的性质。因此，基于SOM的哈希方法相比于使用一般方法来优化公式\ref{eq:4}的算法，理应具有更优的亲和误差。
+
+\section{算法介绍}
+\subsection{在线自组织哈希}
+在线自组织哈希（SOH）的研究动机来自SOM算法。SOH以在线自组织的形式来量化特征空间，而不是使用离线的EM算法的形式。并且，SOH并不是采用传统的二维或一维的网络映射，而是将神经元节点构建成一个$b$维的超立方体。 该超立方体具有$k=2^{b}$个顶点，从而每个顶点都有一个唯一的$b$比特位的二值编码$\mathbf{y}_{i}$。该方法在每一步最小化下面的亲和保持采样函数：
+\begin{equation}\label{objective_soh}
+\begin{split}
+E(t) = \sum_{i=1}^{k} \eta(v, i, t) \big( ||\mathbf{x}(t) - \mathbf{w}_{i}||^{2} + \beta  E_{\mathrm{aff}}(\mathbf{w}_{i})\big)
+\end{split}
+\end{equation}
+其中$\beta$是一个固定的权值。
+\begin{equation}\label{E_aff_w}
+E_{\mathrm{aff}}(\mathbf{w}_{i}) =  \sum_{j=1}^{k}(d(\mathbf{w}_{i}, \mathbf{w}_{j}) - d_{h}(i, j))^{2}
+\end{equation}
+由此可以推导出算法\ref{alg:som}的第二步中新的更新公式:
+\begin{equation}\label{eq_newupdate}
+\begin{split}
+\Delta\mathbf{w}_{i}(t) = &  \alpha(t)\eta(v, i, t)\big(\mathbf{x}(t) \\ &- \mathbf{w}_{i}(t) -  \beta \frac{\partial E_{\mathrm{aff}}(\mathbf{w}_{i})}{\partial \mathbf{w}_{i}}\big)
+\end{split}
+\end{equation}
+We can derive from Eq.(\ref{E_aff_w}) that:
+\begin{equation}\label{eq_partial}
+\frac{\partial E_{\mathrm{aff}}}{\partial \mathbf{w}_{i}} = \sum_{j=1}^{k}4 \Big(1 - \frac{d_{h}(i, j)}{d(\mathbf{w}_{i}, \mathbf{w}_{j})} \Big)(\mathbf{w}_{i} - \mathbf{w}_{j})
+\end{equation}
+
+In each iteration we adjust the index points according to Eq.(\ref{eq_newupdate}) and Eq.(\ref{eq_partial}). We compute the
+distance of two index points in Eq.(\ref{eq:7}) in grid using the square of Hamming distance of their binary indices:
+\begin{equation}\label{10}
+Dist(\mathbf{r}_{v} , \mathbf{r}_{i}) = h(\mathbf{y}_{v}, \mathbf{y}_{i})^2,
+\end{equation}
+
+After learning, we assign each sample $\mathbf{x} \in \mathbf{X}$ a binary code as the binary indices of the nearest index point.
